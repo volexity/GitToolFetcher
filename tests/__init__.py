@@ -1,0 +1,1 @@
+"""GitManager's test cases."""

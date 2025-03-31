@@ -1,0 +1,134 @@
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+[project]
+name = "gittoolfetcher"
+dynamic = ["version"]
+description = "A git management tool, making it easy to install and use multiple concurent version of a same project."
+readme = "README.md"
+requires-python = ">=3.10"
+keywords = []
+authors = [
+  { name = "Killian Raimbaud", email = "kraimbaud@volexity.com" },
+]
+classifiers = [
+  "Programming Language :: Python",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: Implementation :: CPython",
+  "Programming Language :: Python :: Implementation :: PyPy",
+]
+dependencies = [
+  "requests~=2.32.3",
+  "tqdm~=4.67.1",
+  "yaspin~=3.1.0",
+]
+
+[project.scripts]
+gittoolfetcher = "volexity.gittoolfetcher.cli:run_cli"
+
+[project.urls]
+Documentation = "https://github.com/volexity/gittoolfetcher/blob/main/README.md"
+Issues = "https://github.com/volexity/gittoolfetcher/issues"
+Source = "https://github.com/volexity/gittoolfetcher"
+
+[envs.hatch-static-analysis]
+config-path = "none"
+
+[tool.coverage.run]
+source_pkgs = ["volexity.gittoolfetcher", "tests"]
+branch = true
+parallel = true
+omit = [
+  "src/volexity/gittoolfetcher/_version.py",
+]
+
+[tool.coverage.paths]
+gittoolfetcher = ["src/volexity/gittoolfetcher", "*/gittoolfetcher/src/volexity/gittoolfetcher"]
+tests = ["tests", "*/gittoolfetcher/tests"]
+
+[tool.coverage.report]
+exclude_lines = [
+  "no cov",
+  "if __name__ == .__main__.:",
+  "if TYPE_CHECKING:",
+]
+
+[tool.hatch.build.hooks.vcs]
+version-file = "src/volexity/gittoolfetcher/_version.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/volexity"]
+
+[tool.hatch.envs.default]
+extra-dependencies = [
+  "mypy~=1.13",
+
+  "types-requests",
+  "types-tqdm",
+]
+
+[tool.hatch.envs.types.scripts]
+check = "mypy --install-types --non-interactive {args:src/volexity/gittoolfetcher tests}"
+
+[tool.hatch.envs.hatch-static-analysis]
+config-path = "none"
+dependencies = ["ruff~=0.9"]
+
+[tool.hatch.envs.hatch-test]
+extra-dependencies = []
+
+[[tool.hatch.envs.hatch-test.matrix]]
+python = ["3.13", "3.12", "3.11", "3.10"]
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.mypy]
+explicit_package_bases = true
+files = ["src"]
+mypy_path = "src"
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+  "C901",
+  "COM812",
+  "D105",
+  "D107",
+  "ERA001",
+  "FBT001",
+  "FBT002",
+  "FIX001",
+  "FIX002",
+  "FIX003",
+  "FIX004",
+  "G004",
+  "ISC001",
+  "PLR0912",
+  "PLR0913",
+  "PTH123",
+  "TD001",
+  "TD002",
+  "TD003",
+]
+pydocstyle = { convention = 'google' }
+
+[tool.ruff.lint.per-file-ignores]
+"**/_version.py" = [
+  "D100",
+  "SIM108"
+]
+"**/tests/**/*" = [
+  "D100",
+  "S"
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["volexity.gittoolfetcher"]

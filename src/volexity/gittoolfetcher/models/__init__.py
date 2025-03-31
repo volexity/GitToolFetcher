@@ -1,0 +1,1 @@
+"""GitToolFetcher's data models."""

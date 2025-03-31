@@ -1,0 +1,19 @@
+# Project
+storage
+
+# Python
+*.egg
+*.egg-info/
+*.pyc
+.Python
+.coverage
+.venv
+__pycache__/
+_version.py
+dist/
+
+# Direnv
+.envrc
+
+# Vim
+*.sw*
