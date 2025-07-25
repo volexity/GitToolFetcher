@@ -15,6 +15,8 @@ import requests
 from tqdm import tqdm
 from yaspin import yaspin
 
+from .models.tool_process_error import ToolProcessError
+
 logger: Final[logging.Logger] = logging.getLogger(__name__)
 
 PROGRESS_BAR_FORMAT: Final[str] = (
@@ -33,8 +35,8 @@ class GitToolFetcher:
         bin_path: Path | None = None,
         version_encode_callback: Callable[[str], str | None] | None = None,
         version_decode_callback: Callable[[str], str | None] | None = None,
-        install_callback: Callable[[str, Path, Path], None] | None = None,
-        uninstall_callback: Callable[[str, Path], None] | None = None,
+        install_callback: Callable[[str, Path, Path], Any] | None = None,
+        uninstall_callback: Callable[[str, Path], Any] | None = None,
         display_progress: bool = False,
     ) -> None:
         """Initialize the GitToolFetcher context with default values.
@@ -49,8 +51,10 @@ class GitToolFetcher:
                                                                           into the project's tags.
             version_decode_callback (Callable[[str], str | None] | None): Callback to decode the project's tags
                                                                           into a version string.
-            install_callback (Callable[[str, Path, Path], None] | None): Custom logic for the install process (if any).
-            uninstall_callback (Callable[[str, Path], None] | None): Custom logic for the uninstall process (if any).
+            install_callback (Callable[[str, Path, Path], Any] | None):
+                                                                            Custom logic for the install process.
+            uninstall_callback (Callable[[str, Path], Any] | None):
+                                                                            Custom logic for the uninstall process.
             display_progress (bool): Weather to output progress updates to the console.
         """
         super().__init__()
@@ -70,10 +74,10 @@ class GitToolFetcher:
         self.__version_decode_callback: Final[Callable[[str], str | None]] = (
             version_decode_callback if version_decode_callback else self.__default_version_callback
         )
-        self.__install_callback: Final[Callable[[str, Path, Path], None]] = (
+        self.__install_callback: Final[Callable[[str, Path, Path], dict[str, Any] | None]] = (
             install_callback if install_callback else self.__default_install_callback
         )
-        self.__uninstall_callback: Final[Callable[[str, Path], None]] = (
+        self.__uninstall_callback: Final[Callable[[str, Path], dict[str, Any] | None]] = (
             uninstall_callback if uninstall_callback else self.__default_uninstall_callback
         )
 
@@ -94,27 +98,41 @@ class GitToolFetcher:
 
     @staticmethod
     def __default_version_callback(version: str) -> str:
-        """."""
+        """Default version encode/decode callback, simply returns the version string without alteration.
+
+        Args:
+            version (str): Version string to encode/decode.
+
+        Returns:
+            str: Encoded/Decoded version string.
+        """
         return version
 
     @staticmethod
-    def __default_install_callback(version: str, archive_data_path: Path, install_path: Path) -> None:  # noqa: ARG004
+    def __default_install_callback(version: str, archive_data_path: Path, install_path: Path) -> dict[str, Any] | None:  # noqa: ARG004
         """Default install callback, simply moves the content of the archive to the install directory.
 
         Args:
             version (str): The version of the project being installed.
             archive_data_path (Path): The path to the content of the project's archive.
             install_path (Path): The path to the temporary install directory.
+
+        Returns:
+            dict[str, Any]: User defined return data.
         """
         archive_data_path.rename(install_path)
+        return None
 
     @staticmethod
-    def __default_uninstall_callback(version: str, install_path: Path) -> None:
+    def __default_uninstall_callback(version: str, install_path: Path) -> dict[str, Any] | None:
         """Default uninstall callback, performs no action.
 
         Args:
             version (str): The version of the project being installed.
             install_path (Path): The path to the temporary install directory.
+
+        Returns:
+            dict[str, Any]: User defined return data.
         """
 
     @staticmethod
@@ -279,7 +297,7 @@ class GitToolFetcher:
         msg: Final[str] = f"{enc_version} is not a valid {self.__repo_name} version."
         raise ValueError(msg)
 
-    def install(self, version: str, *, force: bool = False) -> bool:
+    def install(self, version: str, *, force: bool = False) -> tuple[bool, Any | None]:
         """Installs the specified project version.
 
         This method checks if the specified project version is already installed.
@@ -296,16 +314,19 @@ class GitToolFetcher:
 
         Returns:
             bool: True if the install succeded.
+            Any | None: Custom data returned by the install callback.
+                        Returns None if the command didn't run.
 
         Raises:
             Exception: If an error occurs during the installation process.
         """
+        result: dict[str, Any] | None = None
         if enc_version := self.__version_encode_callback(version):
             # Checks for previously installed versions
             installed: Final[Iterable[str]] = self._list_installed()
             if not force and enc_version in installed:
                 logger.info(f"{self.__repo_name} version {enc_version} already installed")
-                return True
+                return (True, result)
 
             # Checks for available versions
             available: Iterable[str] = self._list_available()
@@ -314,7 +335,7 @@ class GitToolFetcher:
                 available = self._list_available(refresh=True)
                 if enc_version not in available:
                     logger.error(f"{self.__repo_name} version {enc_version} is not available")
-                    return False
+                    return (False, result)
 
             # Install the new version
             try:
@@ -351,9 +372,9 @@ class GitToolFetcher:
                         with yaspin() as spinner:
                             spinner.color = "green"
                             spinner.text = f'Installing "{self.__repo_name}" version {enc_version} ...'
-                            self.__install_callback(version, archive_data_path, tmp_install_path)
+                            result = self.__install_callback(version, archive_data_path, tmp_install_path)
                     else:
-                        self.__install_callback(version, archive_data_path, tmp_install_path)
+                        result = self.__install_callback(version, archive_data_path, tmp_install_path)
 
                     tmp_install_path.rename(install_path)
 
@@ -366,15 +387,21 @@ class GitToolFetcher:
 
                 # STEP.3 : Cleanup
                 tar_path.unlink()
-            except FileNotFoundError:
+            except Exception as e:
+                # General exception logic
                 logger.exception(f"{self.__repo_name} version {enc_version} installation failed")
-            except Exception:  # TODO: Presice
-                logger.exception(f"{self.__repo_name} version {enc_version} installation failed")
+                if isinstance(e, FileNotFoundError):
+                    pass
+                elif isinstance(e, ToolProcessError):
+                    result = e.result
+                else:
+                    # Raise what we can't handle
+                    raise
             else:
-                return True
-        return False
+                return (True, result)
+        return (False, result)
 
-    def uninstall(self, version: str) -> bool:
+    def uninstall(self, version: str) -> tuple[bool, Any | None]:
         """Uninstall a locally installed version.
 
         Args:
@@ -382,23 +409,26 @@ class GitToolFetcher:
 
         Return:
             bool : True if the uninstall succeded.
+            Any | None: Custom data returned by the install callback.
+                        Returns None if the command didn't run.
         """
+        result: dict[str, Any] | None = None
         if enc_version := self.__version_encode_callback(version):
             logger.debug(f"Uninstall version: {enc_version}")
             installed_versions: Final[Iterable[str]] = self._list_installed()
 
             if enc_version not in installed_versions:
                 logger.error(f"{self.__repo_name} version {enc_version} not installed")
-                return False
+                return (False, result)
 
             install_dir: Final[Path] = self.__install_path / enc_version
-            self.__uninstall_callback(version, install_dir)
+            result = self.__uninstall_callback(version, install_dir)
 
             with TemporaryDirectory(prefix=f"remove_{enc_version}_", dir=self.__tmp_path) as remove_tmpdir:
                 install_dir.rename(Path(remove_tmpdir) / enc_version)
                 logger.info(f"{self.__repo_name} version {enc_version} has been uninstalled")
-            return True
-        return False
+            return (True, result)
+        return (False, result)
 
     def get_tool_path(self, version: str) -> Path | None:
         """Returns the absolute install path of the specified project version.
@@ -460,4 +490,5 @@ class GitToolFetcher:
                 stderr=stderr,
             )
             return status.returncode
-        return 0
+        msg: str = f"Tool version {version} unavailable !"
+        raise ValueError(msg)
