@@ -2,9 +2,20 @@
 
 GitToolFetcher is a tool to help managing multiple concurent versions of GitHub hosted projects.
 
-## Build & Install
+## How to install
 
-To build GitToolFetcher use Hatch's usual build command :
+To install GitToolFetcher, we recommend pulling directly from PyPi :
+
+```bash
+pip install gittoolfetcher
+```
+
+This will install GitToolFetcher as well as its necessary dependencies.
+
+### Building from source
+
+If you wish to build & install GitToolFetcher from source instead, use Hatch's usual build command :
+
 ```bash
 hatch build
 ```

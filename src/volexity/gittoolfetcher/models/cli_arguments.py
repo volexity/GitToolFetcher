@@ -49,22 +49,23 @@ class CLIArguments:
         self.__show: Final[bool] = parsed_args.show
         self.__force: Final[bool] = parsed_args.force
 
-        self.__install: Final[list[str]] = (
-            [ver for row in (vers.split(",") for vers in parsed_args.install) for ver in row]
+        # Sanity check: using set comprehension to remove duplicates
+        self.__install: Final[set[str]] = (
+            {ver for row in (vers.split(",") for vers in parsed_args.install) for ver in row}
             if parsed_args.install
-            else []
+            else set()
         )
 
-        self.__uninstall: Final[list[str]] = (
-            [ver for row in (vers.split(",") for vers in parsed_args.uninstall) for ver in row]
+        self.__uninstall: Final[set[str]] = (
+            {ver for row in (vers.split(",") for vers in parsed_args.uninstall) for ver in row}
             if parsed_args.uninstall
-            else []
+            else set()
         )
 
-        self.__version: Final[list[str]] = (
-            [ver for row in (vers.split(",") for vers in parsed_args.version) for ver in row]
+        self.__version: Final[set[str]] = (
+            {ver for row in (vers.split(",") for vers in parsed_args.version) for ver in row}
             if parsed_args.version
-            else []
+            else set()
         )
 
         self.__list: Final[bool] = parsed_args.list
@@ -108,29 +109,29 @@ class CLIArguments:
         return self.__force
 
     @property
-    def install(self) -> list[str]:
+    def install(self) -> set[str]:
         """Returns the list of project versions to install.
 
         Returns:
-            list[str] : List of project versions to install.
+            set[str] : List of project versions to install.
         """
         return self.__install.copy()
 
     @property
-    def uninstall(self) -> list[str]:
+    def uninstall(self) -> set[str]:
         """Returns the list of project versions to uninstall.
 
         Returns:
-            list[str] : List of project versions to uninstall.
+            set[str] : List of project versions to uninstall.
         """
         return self.__uninstall.copy()
 
     @property
-    def version(self) -> list[str]:
+    def version(self) -> set[str]:
         """Returns the selected project version.
 
         Returns:
-            list[str] : List of selected project versions.
+            set[str] : List of selected project versions.
         """
         return self.__version.copy()
 
@@ -157,6 +158,6 @@ class CLIArguments:
         """Returns wether to list the installed project versions.
 
         Returns:
-            bool : Wether to list the installed project versions.
+            bool : Whether to list the installed project versions.
         """
         return self.__list
