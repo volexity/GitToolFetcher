@@ -23,8 +23,7 @@ classifiers = [
 ]
 dependencies = [
   "requests~=2.32.3",
-  "tqdm~=4.67.1",
-  "yaspin~=3.1.0",
+  "yaspin~=3.1.0"
 ]
 
 [project.scripts]
@@ -66,9 +65,7 @@ packages = ["src/volexity"]
 [tool.hatch.envs.default]
 extra-dependencies = [
   "mypy~=1.13",
-
-  "types-requests",
-  "types-tqdm",
+  "types-requests"
 ]
 
 [tool.hatch.envs.types.scripts]
