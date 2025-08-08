@@ -12,7 +12,7 @@ from tempfile import TemporaryDirectory
 from typing import Any, Final
 
 import requests
-from multiprocess import Process, Queue
+from multiprocess import Process, Queue  # type: ignore[import-untyped]
 from yaspin import yaspin
 
 logger: Final[logging.Logger] = logging.getLogger(__name__)
@@ -22,6 +22,7 @@ formatter = logging.Formatter("\rGitToolFetcher: %(message)s")
 handler.setFormatter(formatter)
 logger.addHandler(handler)
 logger.propagate = False
+
 
 class GitToolFetcher:
     """GitToolFetcher manages multiple versions of github-hosted projects."""
@@ -237,7 +238,7 @@ class GitToolFetcher:
         archive_queue.put((version, archive_path))
         return True
 
-    def download(self, *versions: str, target_dir: Path, force: bool = False) -> list[tuple[str,Path]]:
+    def download(self, *versions: str, target_dir: Path, force: bool = False) -> list[tuple[str, Path]]:
         """Downloads all desired project versions from Github.
 
         Args:
@@ -265,12 +266,7 @@ class GitToolFetcher:
         process_pool: Final[list[Process]] = [
             Process(
                 target=self._download,
-                kwargs={
-                    "archive_queue": archive_queue,
-                    "version": version,
-                    "target_dir": target_dir,
-                    "force": force
-                },
+                kwargs={"archive_queue": archive_queue, "version": version, "target_dir": target_dir, "force": force},
             )
             for version in enc_versions
         ]
@@ -415,7 +411,7 @@ class GitToolFetcher:
             spinner.color = "green"
             # Download all version tarballs from Github
             tar_paths: Final[list[tuple[str, Path]]] = self.download(
-                *versions,target_dir=self.__download_path, force=force
+                *versions, target_dir=self.__download_path, force=force
             )
 
             logger.info("\033[1mINSTALL\033[0m")
@@ -426,12 +422,7 @@ class GitToolFetcher:
             process_pool: Final[list[Process]] = [
                 Process(
                     target=self._install,
-                    kwargs={
-                        "success_queue": success_queue,
-                        "version": version,
-                        "tar_path": tar_path,
-                        "force": force
-                    },
+                    kwargs={"success_queue": success_queue, "version": version, "tar_path": tar_path, "force": force},
                 )
                 for version, tar_path in tar_paths
             ]

@@ -7,7 +7,7 @@ from cmd import Cmd
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
-import multiprocess
+import multiprocess  # type: ignore[import-untyped]
 
 from .git_tool_fetcher import GitToolFetcher
 from .models.cli_arguments import CLIArguments
