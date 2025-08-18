@@ -17,3 +17,5 @@ dist/
 
 # Vim
 *.sw*
+
+.DS_Store
