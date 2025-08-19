@@ -1,4 +1,4 @@
-"""."""
+"""Dataclass containing the success status and resulting data of a Tool's management operation."""
 
 from dataclasses import dataclass
 from typing import Any
@@ -6,7 +6,7 @@ from typing import Any
 
 @dataclass
 class ToolManagementResult:
-    """.
+    """Dataclass containing the success status and resulting data of a Tool's management operation.
 
     Members:
         version (str): .

@@ -1,5 +1,6 @@
 """GitToolFetcher manages multiple versions of github-hosted projects."""
 
+import contextlib
 import json
 import logging
 import os
@@ -28,6 +29,10 @@ handler.setFormatter(formatter)
 logger.addHandler(handler)
 logger.propagate = False
 
+# Spawns fresh interpreter, avoids issues with fork() from global thread
+with contextlib.suppress(RuntimeError):
+    multiprocess.set_start_method("spawn")
+
 
 class GitToolFetcher:
     """GitToolFetcher manages multiple versions of github-hosted projects."""
@@ -55,10 +60,8 @@ class GitToolFetcher:
                                                                           into the project's tags.
             version_decode_callback (Callable[[str], str | None] | None): Callback to decode the project's tags
                                                                           into a version string.
-            install_callback (Callable[[str, Path, Path], Any] | None):
-                                                                            Custom logic for the install process.
-            uninstall_callback (Callable[[str, Path], Any] | None):
-                                                                            Custom logic for the uninstall process.
+            install_callback (Callable[[str, Path, Path], Any] | None): Custom logic for the install process.
+            uninstall_callback (Callable[[str, Path], Any] | None): Custom logic for the uninstall process.
             display_progress (bool): Weather to output progress updates to the console.
         """
         super().__init__()
@@ -78,10 +81,10 @@ class GitToolFetcher:
         self.__version_decode_callback: Final[Callable[[str], str | None]] = (
             version_decode_callback if version_decode_callback else self.__default_version_callback
         )
-        self.__install_callback: Final[Callable[[str, Path, Path], dict[str, Any] | None]] = (
+        self.__install_callback: Final[Callable[[str, Path, Path], Any]] = (
             install_callback if install_callback else self.__default_install_callback
         )
-        self.__uninstall_callback: Final[Callable[[str, Path], dict[str, Any] | None]] = (
+        self.__uninstall_callback: Final[Callable[[str, Path], Any]] = (
             uninstall_callback if uninstall_callback else self.__default_uninstall_callback
         )
 
@@ -113,32 +116,25 @@ class GitToolFetcher:
         return version
 
     @staticmethod
-    def __default_install_callback(_version: str, archive_data_path: Path, install_path: Path) -> dict[str, Any] | None:
+    def __default_install_callback(_version: str, archive_data_path: Path, install_path: Path) -> None:
         """Default install callback, simply moves the content of the archive to the install directory.
 
         Args:
             version (str): The version of the project being installed.
             archive_data_path (Path): The path to the content of the project's archive.
             install_path (Path): The path to the temporary install directory.
-
-        Returns:
-            dict[str, Any]: User defined return data.
         """
         archive_data_path.rename(install_path)
-        return None
 
     @staticmethod
-    def __default_uninstall_callback(_version: str, _install_path: Path) -> dict[str, Any] | None:
+    def __default_uninstall_callback(_version: str, _install_path: Path) -> None:
         """Default uninstall callback, performs no action.
 
         Args:
             version (str): The version of the project being installed.
             install_path (Path): The path to the temporary install directory.
-
-        Returns:
-            dict[str, Any]: User defined return data.
         """
-        return None
+        return
 
     @staticmethod
     def __sanitize(path: Path) -> Path:
@@ -170,7 +166,8 @@ class GitToolFetcher:
             tags: Any = json.loads(tags_data)
 
             for tag in tags:
-                available_versions[tag["name"]] = tag["tarball_url"]
+                if (version := self.__version_decode_callback(tag["name"])) is not None:
+                    available_versions[version] = tag["tarball_url"]
 
             if response.links.get("next") is None:
                 break
@@ -286,13 +283,6 @@ class GitToolFetcher:
         """
         logger.info("\033[1mDOWNLOAD\033[0m")
 
-        enc_versions: list[str] = []
-        for version in versions:
-            if enc_version := self.__version_encode_callback(version):
-                enc_versions.append(enc_version)
-            else:
-                logger.error(f"\033[31m✘\033[0m Version {version} encoding is not valid, skipping.")
-
         archive_queue: multiprocess.queues.Queue[tuple[str, Path]] = cast(
             "multiprocess.queues.Queue[tuple[str, Path]]", multiprocess.Queue()
         )
@@ -301,7 +291,7 @@ class GitToolFetcher:
                 target=self._download_task,
                 kwargs={"archive_queue": archive_queue, "version": version, "target_dir": target_dir, "force": force},
             )
-            for version in enc_versions
+            for version in versions
         ]
 
         for process in process_pool:
@@ -368,24 +358,19 @@ class GitToolFetcher:
         Raises:
             Exception: If an error occurs during the installation process.
         """
-        enc_version: str | None = self.__version_encode_callback(version)
-        if enc_version is None:
-            output_queue.put(ToolManagementResult(version, status=False, result=None))
-            return
-
         # Checks for previously installed versions
         installed: Final[Iterable[str]] = self._list_installed()
-        if not force and enc_version in installed:
+        if not force and version in installed:
             logger.info(f"\033[32m✔\033[0m {self.__repo_name} version {version} is already installed.")
             output_queue.put(ToolManagementResult(version, status=True, result=None))
             return
 
         # Checks for available versions
         available: Iterable[str] = self._list_available()
-        if enc_version not in available:
+        if version not in available:
             # Attempts to refresh the cache
             available = self._list_available(refresh=True)
-            if enc_version not in available:
+            if version not in available:
                 logger.info(f"\033[31m✘\033[0m {self.__repo_name} version {version} is not available.")
                 output_queue.put(ToolManagementResult(version, status=False, result=None))
                 return
@@ -396,7 +381,7 @@ class GitToolFetcher:
             # STEP.1 : Install
             with (
                 TemporaryDirectory(
-                    prefix=f"build_{enc_version}_",
+                    prefix=f"build_{version}_",
                     dir=self.__tmp_path,
                     # this is redundant (would get cleaned up automatically) but making
                     # explicit to support future debugging functionality that disables
@@ -407,15 +392,15 @@ class GitToolFetcher:
             ):
                 toplevelname: Final[Path] = GitToolFetcher.__sanitize(Path(tar_file.getnames()[0]))
                 archive_data_path: Final[Path] = Path(build_tmpdir) / toplevelname
-                tmp_install_path: Final[Path] = Path(build_tmpdir) / enc_version
-                install_path: Final[Path] = self.__install_path / enc_version
+                tmp_install_path: Final[Path] = Path(build_tmpdir) / version
+                install_path: Final[Path] = self.__install_path / version
 
                 # Unpack the tarball pulled from Github
                 logger.info(f'Extracting "{self.__repo_name}" version {tar_path.name}')
 
                 for file in tar_file.getmembers():
                     tar_file.extract(file, build_tmpdir)
-                logger.info(f"\033[32m✔\033[0m {enc_version} extracted.")
+                logger.info(f"\033[32m✔\033[0m {version} extracted.")
 
                 if install_path.exists():
                     shutil.rmtree(install_path)
@@ -433,7 +418,7 @@ class GitToolFetcher:
             tar_path.unlink()
         except Exception as e:
             # General exception logic
-            logger.exception(f"{self.__repo_name} version {version} installation failed")
+            logger.error(f"{self.__repo_name} version {version} installation failed")  # noqa: TRY400
             if isinstance(e, FileNotFoundError):
                 pass
             elif isinstance(e, ToolProcessError):
@@ -461,6 +446,7 @@ class GitToolFetcher:
         Returns:
             list[tuple[bool, Any | None]]: List of installation results.
         """
+        result_list: list[ToolManagementResult] = []
         with yaspin() as spinner:
             spinner.color = "green"
             # Download all version tarballs from Github
@@ -489,40 +475,40 @@ class GitToolFetcher:
                 process.join()
 
             # Build a list of successful installations to return
-            success_list: list[ToolManagementResult] = []
             while not output_queue.empty():
-                success_list.append(output_queue.get())
+                result_list.append(output_queue.get())
+        return result_list
 
-            return success_list
-
-    def uninstall(self, version: str) -> tuple[bool, Any | None]:
+    def uninstall(self, *versions: str) -> list[ToolManagementResult]:
         """Uninstall a locally installed version.
 
         Args:
-            version (str): The project's version to uninstall.
+            *versions (str): The project's versions to uninstall.
 
         Return:
             bool : True if the uninstall succeded.
             Any | None: Custom data returned by the install callback.
                         Returns None if the command didn't run.
         """
-        result: dict[str, Any] | None = None
-        if enc_version := self.__version_encode_callback(version):
-            logger.info(f"Uninstalling version {enc_version}...")
-            installed_versions: Final[Iterable[str]] = self._list_installed()
+        result_list: list[ToolManagementResult] = []
+        for version in versions:
+            result: dict[str, Any] | None = None
+            logger.info(f"Uninstalling version {version}...")
+            installed_versions: Iterable[str] = self._list_installed()
 
-            if enc_version not in installed_versions:
-                logger.error(f"\033[31m✘\033[0m {self.__repo_name} version {enc_version} not installed.")
-                return (False, result)
+            if version not in installed_versions:
+                logger.error(f"\033[31m✘\033[0m {self.__repo_name} version {version} not installed.")
+                result_list.append(ToolManagementResult(version, status=False, result=result))
+                continue
 
-            install_dir: Final[Path] = self.__install_path / enc_version
+            install_dir: Path = self.__install_path / version
             result = self.__uninstall_callback(version, install_dir)
 
-            with TemporaryDirectory(prefix=f"remove_{enc_version}_", dir=self.__tmp_path) as remove_tmpdir:
-                install_dir.rename(Path(remove_tmpdir) / enc_version)
-                logger.info(f"\033[32m✔\033[0m {self.__repo_name} version {enc_version} has been uninstalled.")
-            return (True, result)
-        return (False, result)
+            with TemporaryDirectory(prefix=f"remove_{version}_", dir=self.__tmp_path) as remove_tmpdir:
+                install_dir.rename(Path(remove_tmpdir) / version)
+                logger.info(f"\033[32m✔\033[0m {self.__repo_name} version {version} has been uninstalled.")
+            result_list.append(ToolManagementResult(version, status=True, result=result))
+        return result_list
 
     def get_tool_path(self, version: str) -> Path | None:
         """Returns the absolute install path of the specified project version.
@@ -533,8 +519,8 @@ class GitToolFetcher:
         Returns:
             Path : The path to the specified project version (if any).
         """
-        if (enc_version := self.__version_encode_callback(version)) and enc_version in self._list_installed():
-            return (self.__install_path / enc_version).resolve()
+        if version in self._list_installed():
+            return (self.__install_path / version).resolve()
         return None
 
     def run(

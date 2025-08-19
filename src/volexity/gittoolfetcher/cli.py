@@ -7,8 +7,6 @@ from cmd import Cmd
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
-import multiprocess  # type: ignore[import-untyped]
-
 from .git_tool_fetcher import GitToolFetcher
 from .models.cli_arguments import CLIArguments
 
@@ -23,8 +21,6 @@ logger: Final[logging.Logger] = logging.getLogger(__name__)
 
 def run_cli() -> None:
     """Implements the GitToolFetcher command line interface."""
-    # Spawns fresh interpreter, avoids issues with fork() from global thread
-    multiprocess.set_start_method("spawn")
     storage_base: Final[Path] = Path("storage")
     bin_path: Final[Path] = Path("bin")
 
