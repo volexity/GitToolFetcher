@@ -10,24 +10,36 @@ import tarfile
 from collections.abc import Callable, Iterable
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any, Final, cast
+from typing import TYPE_CHECKING, Any, Final, TypeAlias, cast
 
 import multiprocess  # type: ignore[import-untyped]
 import multiprocess.queues  # type: ignore[import-untyped]
 import requests
 from multiprocess import Process
-from yaspin import yaspin
+from multiprocess.queues import Queue
 
 from .models.tool_management_result import ToolManagementResult
 from .models.tool_process_error import ToolProcessError
+from .plaintext_stream_handler import PlainTextStreamHandler
 
 logger: Final[logging.Logger] = logging.getLogger(__name__)
 
-handler = logging.StreamHandler()
-formatter = logging.Formatter("\rGitToolFetcher: %(message)s")
+
+handler = PlainTextStreamHandler()
+formatter = logging.Formatter("GitToolFetcher: %(message)s")
 handler.setFormatter(formatter)
 logger.addHandler(handler)
 logger.propagate = False
+
+if TYPE_CHECKING:
+    ArchiveQueue: TypeAlias = Queue[tuple[str, Path]]  # only for static analysis
+    OutputQueue: TypeAlias = multiprocess.queues.Queue[ToolManagementResult]
+else:
+    ArchiveQueue = Queue
+    OutputQueue = Queue
+
+archive_queue: ArchiveQueue
+output_queue: OutputQueue
 
 # Spawns fresh interpreter, avoids issues with fork() from global thread
 with contextlib.suppress(RuntimeError):
@@ -214,7 +226,7 @@ class GitToolFetcher:
 
     def _download_task(
         self,
-        archive_queue: multiprocess.queues.Queue[tuple[str, Path]],
+        archive_queue: ArchiveQueue,
         version: str,
         target_dir: Path,
         *,
@@ -330,7 +342,7 @@ class GitToolFetcher:
 
     def _install_task(
         self,
-        output_queue: multiprocess.queues.Queue[ToolManagementResult],
+        output_queue: OutputQueue,
         version: str,
         tar_path: Path,
         *,
@@ -447,36 +459,34 @@ class GitToolFetcher:
             list[tuple[bool, Any | None]]: List of installation results.
         """
         result_list: list[ToolManagementResult] = []
-        with yaspin() as spinner:
-            spinner.color = "green"
-            # Download all version tarballs from Github
-            tar_paths: Final[list[tuple[str, Path]]] = self.download(
-                *versions, target_dir=self.__download_path, force=force
+        # Download all version tarballs from Github
+        tar_paths: Final[list[tuple[str, Path]]] = self.download(
+            *versions, target_dir=self.__download_path, force=force
+        )
+
+        logger.info("\033[1mINSTALL\033[0m")
+
+        # Execute the installations in parallel
+        output_queue: Final[multiprocess.queues.Queue[ToolManagementResult]] = cast(
+            "multiprocess.queues.Queue[ToolManagementResult]", multiprocess.Queue()
+        )
+        process_pool: Final[list[Process]] = [
+            Process(
+                target=self._install_task,
+                kwargs={"output_queue": output_queue, "version": version, "tar_path": tar_path, "force": force},
             )
+            for version, tar_path in tar_paths
+        ]
 
-            logger.info("\033[1mINSTALL\033[0m")
+        for process in process_pool:
+            process.start()
 
-            # Execute the installations in parallel
-            output_queue: Final[multiprocess.queues.Queue[ToolManagementResult]] = cast(
-                "multiprocess.queues.Queue[ToolManagementResult]", multiprocess.Queue()
-            )
-            process_pool: Final[list[Process]] = [
-                Process(
-                    target=self._install_task,
-                    kwargs={"output_queue": output_queue, "version": version, "tar_path": tar_path, "force": force},
-                )
-                for version, tar_path in tar_paths
-            ]
+        for process in process_pool:
+            process.join()
 
-            for process in process_pool:
-                process.start()
-
-            for process in process_pool:
-                process.join()
-
-            # Build a list of successful installations to return
-            while not output_queue.empty():
-                result_list.append(output_queue.get())
+        # Build a list of successful installations to return
+        while not output_queue.empty():
+            result_list.append(output_queue.get())
         return result_list
 
     def uninstall(self, *versions: str) -> list[ToolManagementResult]:
